@@ -30,8 +30,7 @@ python3 audit_logs_for_admins_v1.0.py
 **Purpose**: Retrieves basic user information from Nobl9.
 
 **Features**:
-- Lists all users with basic details (name, email, roles)
-- Displays user count and role distribution
+- Lists all users with name and userID
 - Simple table format output
 - Error handling and progress indicators
 
@@ -42,29 +41,13 @@ python3 users_basic_v1.2.py
 
 **Dependencies**: `requests`, `toml`, `tabulate`, `sloctl` CLI
 
-### 3. `creators_v1.0.py`
-**Purpose**: Identifies and displays users who have created SLOs in Nobl9.
-
-**Features**:
-- Finds users who have created SLOs
-- Shows creation counts per user
-- Displays SLO details including names and creation dates
-- Export capabilities for SLO creator data
-
-**Usage**:
-```bash
-python3 creators_v1.0.py
-```
-
-**Dependencies**: `requests`, `pandas`, `openpyxl`, `toml`, `tabulate`, `sloctl` CLI
-
-### 4. `usersdetailed_v2.0.py`
+### 3. `usersdetailed_v2.0.py`
 **Purpose**: Retrieves comprehensive user information including detailed profiles and permissions.
 
 **Features**:
 - Detailed user profiles with all available information
 - Role and permission analysis
-- User activity and status information
+- User status information
 - Comprehensive data export options
 
 **Usage**:
@@ -73,6 +56,24 @@ python3 usersdetailed_v2.0.py
 ```
 
 **Dependencies**: `requests`, `pandas`, `openpyxl`, `toml`, `tabulate`, `sloctl` CLI
+
+### 4. `creators_v1.0.py`
+**Purpose**: Identifies and displays users who have created SLOs and Projects in Nobl9.
+
+**Features**:
+- Finds users who have created SLOs or Projects
+- Shows creation and last updated date per SLO
+- Displays SLO details including names and displayName
+- Export capabilities for SLO or Project data
+
+**Usage**:
+```bash
+python3 creators_v1.0.py
+```
+
+**Dependencies**: `requests`, `pandas`, `openpyxl`, `toml`, `tabulate`, `sloctl` CLI
+
+
 
 ## Prerequisites
 
