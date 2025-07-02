@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
+"""
+Script name: usersdetailed_v2.0.py
 
+Purpose: Fetches detailed user information from Nobl9 API including roles and projects.
+
+Dependencies: toml, pandas, openpyxl, tabulate, requests
+
+Author: Jeremy Copoper
+Date: 2025-07-02
+"""
 
 import os
 import base64
@@ -11,7 +20,7 @@ from datetime import datetime
 def check_dependencies():
     for pkg in ["toml", "pandas", "openpyxl", "tabulate", "requests"]:
         try:
-            pass
+            __import__(pkg)
         except ImportError:
             print(f"Missing required package: {pkg}")
             exit(1)
@@ -52,9 +61,12 @@ def choose_context(contexts, override=None):
     try:
         choice = input("Select a context: ").strip()
         return keys[int(choice) - 1]
-    except:
+    except (ValueError, IndexError):
         print("Invalid selection.")
         exit(1)
+    except KeyboardInterrupt:
+        print("\nExiting...")
+        exit(0)
 
 
 def get_token(client_id, client_secret, org_name):
@@ -66,7 +78,14 @@ def get_token(client_id, client_secret, org_name):
         "Organization": org_name
     }
     res = requests.post("https://app.nobl9.com/api/accessToken", headers=headers)
-    return res.json().get("access_token")
+    if not res.ok:
+        print(f"ERROR: Authentication failed: {res.status_code} {res.text}")
+        exit(1)
+    token = res.json().get("access_token")
+    if not token:
+        print("ERROR: Failed to get access token")
+        exit(1)
+    return token
 
 
 def fetch_users(token, org):
@@ -247,8 +266,11 @@ def main():
     org = args.org or org or input("Enter Nobl9 Organization name: ").strip()
     
     # Always get a fresh token
-    client_id = creds["clientId"]
-    client_secret = creds["clientSecret"]
+    client_id = creds.get("clientId")
+    client_secret = creds.get("clientSecret")
+    if not client_id or not client_secret:
+        print("ERROR: Missing credentials in context.")
+        exit(1)
     token = get_token(client_id, client_secret, org)
     print(f"\nUsing organization: {org}")
 
@@ -259,10 +281,13 @@ def main():
     for i, u in enumerate(user_summaries, 1):
         uid = u.get("userId")
         name = f"{u.get('firstName', '')} {u.get('lastName', '')}".strip()
-        print(f"  [{i}/{len(user_summaries)}] {name}")
+        print(f"  [{i}/{len(user_summaries)}] {name}", end="", flush=True)
         detail = fetch_user_detail(uid, token, org)
         if detail:
             users.append(detail)
+            print(" ✓")
+        else:
+            print(" ✗ (failed)")
 
     flag = "c" if args.c else "j" if args.j else "x" if args.x else None
     export_and_display(users, context, org, flag, args)

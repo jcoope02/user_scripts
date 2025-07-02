@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
+"""
+Script name: creators_v1.0.py
 
-## Script name: creators_v1.0.py
-##
-## Purpose: Authenticates with the Nobl9 Admin API and retrieves ownership metadata (CreatedBy, CreatedAt, UpdatedAt)
-## for SLOs and Projects, then displays and exports the information in a human-readable format.
-##
-## Dependencies: sloctl, pandas, openpyxl, requests, toml
-## Compatible with: macOS and Linux
-##
-## Author: Jeremy Cooper
-## Date Created: 2025-05-15
+Purpose: Authenticates with the Nobl9 Admin API and retrieves ownership metadata (CreatedBy, CreatedAt, UpdatedAt)
+for SLOs and Projects, then displays and exports the information in a human-readable format.
+
+Dependencies: sloctl, pandas, openpyxl, requests, toml
+Compatible with: macOS and Linux
+
+Author: Jeremy Cooper
+Date Created: 2025-05-15
+"""
 
 import subprocess
 import json

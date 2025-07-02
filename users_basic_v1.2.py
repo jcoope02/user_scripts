@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+"""
+Script name: users_basic_v1.2.py
+
+Purpose: Fetches basic user information from Nobl9 API and displays it in a simple table format.
+Retrieves user names and IDs, then offers export options in CSV, JSON, or Excel formats.
+
+Dependencies: toml, pandas, openpyxl, tabulate, requests
+Compatible with: macOS and Linux
+
+Author: Jeremy Cooper
+Date Created: 2025-07-02
+"""
 
 import os
 import csv

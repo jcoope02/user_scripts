@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+"""
+Script name: audit_logs_for_admins_v1.0.py
+
+Purpose: Fetches and analyzes audit logs for admin users in Nobl9. Retrieves detailed audit trail
+information including timestamps, admin actions, and user activities. Supports filtering by time
+periods and specific admin users, with export options in CSV, JSON, and Excel formats.
+
+Dependencies: requests, pandas, openpyxl, toml, tabulate, sloctl CLI
+Compatible with: macOS and Linux
+
+Author: Jeremy Cooper
+Date Created: 2025-07-02
+"""
 
 import requests
 import sys
@@ -91,7 +104,7 @@ def enhanced_choose_context():
     contexts_dict = load_contexts_from_toml()
     if not contexts_dict:
         print("No valid contexts found. Please ensure your config.toml is set up correctly.")
-        return None, None
+        sys.exit(1)
     context_names = list(contexts_dict.keys())
     if len(context_names) == 1:
         selected = context_names[0]
@@ -104,14 +117,20 @@ def enhanced_choose_context():
         index = int(choice) - 1
         selected = context_names[index]
         return selected, contexts_dict[selected]
-    except Exception:
+    except (ValueError, IndexError):
         print("ERROR: Invalid context selection.")
-        return None, None
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nExiting...")
+        sys.exit(0)
 
 def authenticate(credentials):
-    client_id = credentials["clientId"]
-    client_secret = credentials["clientSecret"]
-    org_id = credentials["organization"]
+    client_id = credentials.get("clientId")
+    client_secret = credentials.get("clientSecret")
+    if not client_id or not client_secret:
+        print("ERROR: Missing credentials in context.")
+        sys.exit(1)
+    org_id = credentials.get("organization")
     # Try decoding accessToken if organization is not in config
     if not org_id and credentials.get("accessToken"):
         org_id = decode_jwt_payload(credentials["accessToken"])
@@ -133,15 +152,60 @@ def authenticate(credentials):
     }
     response = requests.post("https://app.nobl9.com/api/accessToken", headers=headers)
     if response.status_code != 200:
-        print(f"ERROR: Authentication failed: {response.text}")
+        print("ERROR: Authentication failed")
+        try:
+            error_data = response.json()
+            if "error" in error_data:
+                error_info = error_data["error"]
+                # Check if error is a string (contains nested JSON) or a dict
+                if isinstance(error_info, str):
+                    try:
+                        # Look for JSON object in the error string
+                        import re
+                        json_match = re.search(r'\{.*\}', error_info)
+                        if json_match:
+                            nested_error = json.loads(json_match.group())
+                            print(f"  Error Code: {nested_error.get('errorCode', 'Unknown')}")
+                            print(f"  Summary: {nested_error.get('errorSummary', 'No summary provided')}")
+                            print(f"  Error ID: {nested_error.get('errorId', 'No ID provided')}")
+                            if nested_error.get('errorCauses'):
+                                print(f"  Causes: {nested_error['errorCauses']}")
+                        else:
+                            # If no JSON found, show the raw error string
+                            print(f"  Error: {error_info}")
+                    except json.JSONDecodeError:
+                        # If nested parsing fails, show the raw error string
+                        print(f"  Error: {error_info}")
+                else:
+                    # Error is already a dictionary
+                    print(f"  Error Code: {error_info.get('errorCode', 'Unknown')}")
+                    print(f"  Summary: {error_info.get('errorSummary', 'No summary provided')}")
+                    print(f"  Error ID: {error_info.get('errorId', 'No ID provided')}")
+                    if error_info.get('errorCauses'):
+                        print(f"  Causes: {error_info['errorCauses']}")
+            elif "message" in error_data:
+                print(f"  Message: {error_data['message']}")
+            else:
+                print(f"  Response: {response.text}")
+        except json.JSONDecodeError:
+            print(f"  Raw response: {response.text}")
         sys.exit(1)
-    token = response.json().get("access_token")
-    if not token:
-        print("ERROR: Failed to get access token")
+    
+    try:
+        token_data = response.json()
+        token = token_data.get("access_token")
+        if not token:
+            print("ERROR: No access token in response")
+            print(f"  Response: {response.text}")
+            sys.exit(1)
+        return token, org_id
+    except json.JSONDecodeError:
+        print("ERROR: Invalid JSON response from authentication endpoint")
+        print(f"  Response: {response.text}")
         sys.exit(1)
-    return token, org_id
 
 def collect_users(token, org):
+    print("Fetching users...")
     headers = {"Authorization": f"Bearer {token}", "Organization": org}
     base_url = "https://app.nobl9.com/api/usrmgmt/v2/users?limit=50"
     next_token = None
@@ -168,7 +232,37 @@ def collect_users(token, org):
             break
 
         if not res.ok:
-            print(f"API error {res.status_code}: {res.text}")
+            print(f"API error {res.status_code}")
+            try:
+                error_data = res.json()
+                if "error" in error_data:
+                    error_info = error_data["error"]
+                    # Check if error is a string (contains nested JSON) or a dict
+                    if isinstance(error_info, str):
+                        try:
+                            # Look for JSON object in the error string
+                            import re
+                            json_match = re.search(r'\{.*\}', error_info)
+                            if json_match:
+                                nested_error = json.loads(json_match.group())
+                                print(f"  Error Code: {nested_error.get('errorCode', 'Unknown')}")
+                                print(f"  Summary: {nested_error.get('errorSummary', 'No summary provided')}")
+                            else:
+                                # If no JSON found, show the raw error string
+                                print(f"  Error: {error_info}")
+                        except json.JSONDecodeError:
+                            # If nested parsing fails, show the raw error string
+                            print(f"  Error: {error_info}")
+                    else:
+                        # Error is already a dictionary
+                        print(f"  Error Code: {error_info.get('errorCode', 'Unknown')}")
+                        print(f"  Summary: {error_info.get('errorSummary', 'No summary provided')}")
+                elif "message" in error_data:
+                    print(f"  Message: {error_data['message']}")
+                else:
+                    print(f"  Response: {res.text}")
+            except json.JSONDecodeError:
+                print(f"  Raw response: {res.text}")
             break
 
         data = res.json()
@@ -177,12 +271,12 @@ def collect_users(token, org):
 
         next_token = data.get("paging", {}).get("next")
         page_count += 1
-        print(f"Page {page_count}: Retrieved {len(users)} users (Total so far: {len(all_users)})")
+        print(f"  Page {page_count}: Retrieved {len(users)} users (Total: {len(all_users)})")
 
         if not next_token:
             break
 
-    print(f"Total users retrieved: {len(all_users)}")
+    print(f"✓ User collection complete! Total: {len(all_users)} users")
     return all_users
 
 def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
@@ -210,6 +304,7 @@ def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
     
     print(f"\nFetching audit logs for {len(admin_user_ids)} admin user(s)...")
     print(f"Time range: {start_time} to {end_time}")
+    print("Progress:")
     
     # Track pagination state
     total_retrieved = 0
@@ -219,7 +314,7 @@ def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
     total_admin_logs = 0
     
     while has_more:
-        print(f"Processing page {offset//limit + 1}...", end="", flush=True)
+        print(f"  Processing page {offset//limit + 1}...", end="", flush=True)
         params = {
             "limit": limit,
             "offset": offset,
@@ -241,8 +336,40 @@ def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
                 timeout=30
             )
             
-            if response.status_code != 200 or 'application/json' not in response.headers.get('Content-Type', ''):
-                print(f"ERROR: API request failed: {response.status_code} {response.text}")
+            if response.status_code != 200:
+                print(f"ERROR: API request failed (Status: {response.status_code})")
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_info = error_data["error"]
+                        # Check if error is a string (contains nested JSON) or a dict
+                        if isinstance(error_info, str):
+                            try:
+                                # Look for JSON object in the error string
+                                import re
+                                json_match = re.search(r'\{.*\}', error_info)
+                                if json_match:
+                                    nested_error = json.loads(json_match.group())
+                                    print(f"  Error Code: {nested_error.get('errorCode', 'Unknown')}")
+                                    print(f"  Summary: {nested_error.get('errorSummary', 'No summary provided')}")
+                                    print(f"  Error ID: {nested_error.get('errorId', 'No ID provided')}")
+                                else:
+                                    # If no JSON found, show the raw error string
+                                    print(f"  Error: {error_info}")
+                            except json.JSONDecodeError:
+                                # If nested parsing fails, show the raw error string
+                                print(f"  Error: {error_info}")
+                        else:
+                            # Error is already a dictionary
+                            print(f"  Error Code: {error_info.get('errorCode', 'Unknown')}")
+                            print(f"  Summary: {error_info.get('errorSummary', 'No summary provided')}")
+                            print(f"  Error ID: {error_info.get('errorId', 'No ID provided')}")
+                    elif "message" in error_data:
+                        print(f"  Message: {error_data['message']}")
+                    else:
+                        print(f"  Response: {response.text}")
+                except json.JSONDecodeError:
+                    print(f"  Raw response: {response.text}")
                 sys.exit(1)
             
             data = response.json()
@@ -284,9 +411,10 @@ def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
                 offset += len(page_logs)
                 
         except Exception as e:
-            print(f"ERROR: Failed to fetch logs: {e}")
+            print(f"\n✗ ERROR: Failed to fetch logs: {e}")
             break
     
+    print(f"\n✓ Audit log collection complete!")
     print(f"\nFinal Summary:")
     print(f"Total logs processed: {total_processed}")
     print(f"Total admin logs found: {total_admin_logs}")
@@ -313,73 +441,82 @@ def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
     return logs
 
 def select_time_period():
-    print("\nSelect time period:")
-    print("  [1] Past 24 hours")
-    print("  [2] Past 7 days")
-    print("  [3] Past 14 days")
-    print("  [4] Past 30 days")
-    print("  [5] Specific day")
-    print("  [6] Custom range")
-    
-    try:
-        choice = int(input("Enter choice: "))
-        now = datetime.utcnow()
+    while True:
+        print("\nSelect time period:")
+        print("  [1] Past 24 hours")
+        print("  [2] Past 7 days")
+        print("  [3] Past 14 days")
+        print("  [4] Past 30 days")
+        print("  [5] Specific day")
+        print("  [6] Custom range")
         
-        if choice == 1:
-            start_time = (now - timedelta(hours=24)).isoformat() + "Z"
-            end_time = now.isoformat() + "Z"
-        elif choice == 2:
-            start_time = (now - timedelta(days=7)).isoformat() + "Z"
-            end_time = now.isoformat() + "Z"
-        elif choice == 3:
-            start_time = (now - timedelta(days=14)).isoformat() + "Z"
-            end_time = now.isoformat() + "Z"
-        elif choice == 4:
-            start_time = (now - timedelta(days=30)).isoformat() + "Z"
-            end_time = now.isoformat() + "Z"
-        elif choice == 5:
-            day = input("Enter date (YYYY-MM-DD): ")
-            start_time = f"{day}T00:00:00Z"
-            end_time = f"{day}T23:59:59Z"
-        elif choice == 6:
-            start_time = input("Enter start time (YYYY-MM-DDThh:mm:ssZ): ")
-            end_time = input("Enter end time (YYYY-MM-DDThh:mm:ssZ): ")
-        else:
-            print("ERROR: Invalid choice")
-            sys.exit(1)
-        
-        return start_time, end_time
-    except ValueError:
-        print("ERROR: Invalid input")
-        sys.exit(1)
+        try:
+            choice = int(input("Enter choice: "))
+            now = datetime.utcnow()
+            
+            if choice == 1:
+                start_time = (now - timedelta(hours=24)).isoformat() + "Z"
+                end_time = now.isoformat() + "Z"
+                return start_time, end_time
+            elif choice == 2:
+                start_time = (now - timedelta(days=7)).isoformat() + "Z"
+                end_time = now.isoformat() + "Z"
+                return start_time, end_time
+            elif choice == 3:
+                start_time = (now - timedelta(days=14)).isoformat() + "Z"
+                end_time = now.isoformat() + "Z"
+                return start_time, end_time
+            elif choice == 4:
+                start_time = (now - timedelta(days=30)).isoformat() + "Z"
+                end_time = now.isoformat() + "Z"
+                return start_time, end_time
+            elif choice == 5:
+                day = input("Enter date (YYYY-MM-DD): ")
+                start_time = f"{day}T00:00:00Z"
+                end_time = f"{day}T23:59:59Z"
+                return start_time, end_time
+            elif choice == 6:
+                start_time = input("Enter start time (YYYY-MM-DDThh:mm:ssZ): ")
+                end_time = input("Enter end time (YYYY-MM-DDThh:mm:ssZ): ")
+                return start_time, end_time
+            else:
+                print("ERROR: Invalid choice. Please enter a number between 1 and 6.")
+                continue
+        except ValueError:
+            print("ERROR: Invalid input. Please enter a number.")
+            continue
 
 def select_admin_users(users):
     """Allow selection of specific admin users or all admins."""
+    print("Identifying admin users...")
     admin_users = [(u["userId"], f"{u.get('firstName', '')} {u.get('lastName', '')}".strip()) 
                   for u in users 
                   if any(role.get("name") == "organization-admin" for role in u.get("roles", []))]
     
     if not admin_users:
-        print("No admin users found.")
+        print("✗ No admin users found.")
         sys.exit(1)
     
-    print("\nSelect admin users to audit:")
-    print("  [0] All admin users")
-    for i, (_, name) in enumerate(admin_users, 1):
-        print(f"  [{i}] {name}")
+    print(f"✓ Found {len(admin_users)} admin user(s)")
     
-    try:
-        choice = int(input("Enter choice: "))
-        if choice == 0:
-            return {uid for uid, _ in admin_users}
-        elif 1 <= choice <= len(admin_users):
-            return {admin_users[choice-1][0]}
-        else:
-            print("ERROR: Invalid choice")
-            sys.exit(1)
-    except ValueError:
-        print("ERROR: Invalid input")
-        sys.exit(1)
+    while True:
+        print("\nSelect admin users to audit:")
+        print("  [0] All admin users")
+        for i, (_, name) in enumerate(admin_users, 1):
+            print(f"  [{i}] {name}")
+        
+        try:
+            choice = int(input("Enter choice: "))
+            if choice == 0:
+                return {uid for uid, _ in admin_users}
+            elif 1 <= choice <= len(admin_users):
+                return {admin_users[choice-1][0]}
+            else:
+                print(f"ERROR: Invalid choice. Please enter a number between 0 and {len(admin_users)}.")
+                continue
+        except ValueError:
+            print("ERROR: Invalid input. Please enter a number.")
+            continue
 
 def display_and_export_logs(logs, users, context):
     """Format logs into a table and offer export options."""
@@ -435,14 +572,14 @@ def display_and_export_logs(logs, users, context):
         print("Invalid choice, skipping export")
 
 def main():
+    print("Nobl9 Admin Audit Log Tool")
+    print("=" * 40)
+    
     check_dependencies()
     context_name, credentials = enhanced_choose_context()
-    if not context_name or not credentials:
-        print("ERROR: Failed to select a valid context")
-        sys.exit(1)
     
-    subprocess.run(["sloctl", "config", "use-context", context_name], 
-                  capture_output=True, text=True, check=False)
+    # Note: sloctl context switching is not needed for direct API calls
+    # but kept for compatibility with other scripts
 
     token, org = authenticate(credentials)
     if not token or not org:
