@@ -79,12 +79,24 @@ def load_contexts_from_toml():
         toml_data = toml.load(toml_path)
         raw_contexts = toml_data.get("contexts", {})
         parsed_contexts = {}
+        
         for ctx_name, creds in raw_contexts.items():
             if "clientId" in creds and "clientSecret" in creds:
+                # Check if this is a custom instance (has url field)
+                is_custom_instance = "url" in creds
+                base_url = creds.get("url")
+                okta_org_url = creds.get("oktaOrgURL")
+                okta_auth_server = creds.get("oktaAuthServer")
+                
                 parsed_contexts[ctx_name] = {
                     "clientId": creds["clientId"],
                     "clientSecret": creds["clientSecret"],
-                    "accessToken": creds.get("accessToken", "")  # Add this line
+                    "accessToken": creds.get("accessToken", ""),
+                    "organization": creds.get("organization", None),
+                    "is_custom_instance": is_custom_instance,
+                    "base_url": base_url,
+                    "oktaOrgURL": okta_org_url,
+                    "oktaAuthServer": okta_auth_server
                 }
         return parsed_contexts
     except Exception as e:
@@ -153,7 +165,21 @@ def authenticate(credentials):
         "Content-Type": "application/json",
         "Organization": org_name or input("Enter Nobl9 Organization name: ")
     }
-    response = requests.post("https://app.nobl9.com/api/accessToken", headers=headers)
+    
+    # Check if this is a custom instance with custom base URL
+    is_custom_instance = credentials.get("is_custom_instance", False)
+    base_url = credentials.get("base_url")
+    okta_org_url = credentials.get("oktaOrgURL")
+    okta_auth_server = credentials.get("oktaAuthServer")
+    
+    if is_custom_instance and base_url:
+        print(f"API base url: {base_url}")
+        # Use custom base URL for authentication
+        auth_url = f"{base_url}/accessToken"
+    else:
+        auth_url = "https://app.nobl9.com/api/accessToken"
+    
+    response = requests.post(auth_url, headers=headers)
     token = response.json().get("access_token")
     if not token:
         print("ERROR: Failed to get access token")
@@ -175,16 +201,22 @@ def run_sloctl(command):
         print(f"ERROR: JSON parsing error: {e}")
         exit(1)
 
-def collect_users(token, org):
+def collect_users(token, org, is_custom_instance=False, custom_base_url=None, okta_org_url=None, okta_auth_server=None):
     headers = {"Authorization": f"Bearer {token}", "Organization": org}
-    base_url = "https://app.nobl9.com/api/usrmgmt/v2/users?limit=50"
+    
+    # Use custom base URL for custom instances
+    if is_custom_instance and custom_base_url:
+        api_base_url = f"{custom_base_url}/usrmgmt/v2/users?limit=50"
+    else:
+        api_base_url = "https://app.nobl9.com/api/usrmgmt/v2/users?limit=50"
+    
     next_token = None
     seen_tokens = set()
     all_users = []
     page_count = 0
 
     while True:
-        url = base_url
+        url = api_base_url
         if next_token:
             if next_token in seen_tokens:
                 print("Repeated next token detected — stopping pagination.")
@@ -313,8 +345,19 @@ def display_projects(projects, user_map):
 def main_loop():
     check_dependencies()
     context, credentials = enhanced_choose_context()
+    if not context or not credentials:
+        print("ERROR: Failed to get context and credentials")
+        sys.exit(1)
+    
     token, org = authenticate(credentials)
-    user_map = collect_users(token, org)
+    
+    # Get custom instance information from credentials
+    is_custom_instance = credentials.get("is_custom_instance", False)
+    custom_base_url = credentials.get("base_url")
+    okta_org_url = credentials.get("oktaOrgURL")
+    okta_auth_server = credentials.get("oktaAuthServer")
+    
+    user_map = collect_users(token, org, is_custom_instance, custom_base_url, okta_org_url, okta_auth_server)
 
     while True:
         print("\nWhat do you want to view?")

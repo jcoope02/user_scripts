@@ -87,13 +87,24 @@ def load_contexts_from_toml():
         toml_data = toml.load(toml_path)
         raw_contexts = toml_data.get("contexts", {})
         parsed_contexts = {}
+        
         for ctx_name, creds in raw_contexts.items():
             if "clientId" in creds and "clientSecret" in creds:
+                # Check if this is a custom instance (has url field)
+                is_custom_instance = "url" in creds
+                base_url = creds.get("url")
+                okta_org_url = creds.get("oktaOrgURL")
+                okta_auth_server = creds.get("oktaAuthServer")
+                
                 parsed_contexts[ctx_name] = {
                     "clientId": creds["clientId"],
                     "clientSecret": creds["clientSecret"],
                     "accessToken": creds.get("accessToken", ""),
-                    "organization": creds.get("organization", None)
+                    "organization": creds.get("organization", None),
+                    "is_custom_instance": is_custom_instance,
+                    "base_url": base_url,
+                    "oktaOrgURL": okta_org_url,
+                    "oktaAuthServer": okta_auth_server
                 }
         return parsed_contexts
     except Exception as e:
@@ -150,7 +161,23 @@ def authenticate(credentials):
         "Content-Type": "application/json",
         "Organization": org_id
     }
-    response = requests.post("https://app.nobl9.com/api/accessToken", headers=headers)
+    
+    # Check if this is a custom instance with custom base URL
+    is_custom_instance = credentials.get("is_custom_instance", False)
+    base_url = credentials.get("base_url")
+    okta_org_url = credentials.get("oktaOrgURL")
+    okta_auth_server = credentials.get("oktaAuthServer")
+    
+    if is_custom_instance and base_url:
+        print(f"API base url: {base_url}")
+        #if okta_org_url:
+           # print(f"Okta Org URL: {okta_org_url}")
+        # Use custom base URL for authentication
+        auth_url = f"{base_url}/accessToken"
+    else:
+        auth_url = "https://app.nobl9.com/api/accessToken"
+    
+    response = requests.post(auth_url, headers=headers)
     if response.status_code != 200:
         print("ERROR: Authentication failed")
         try:
@@ -204,17 +231,22 @@ def authenticate(credentials):
         print(f"  Response: {response.text}")
         sys.exit(1)
 
-def collect_users(token, org):
+def collect_users(token, org, is_custom_instance=False, custom_base_url=None, okta_org_url=None, okta_auth_server=None):
     print("Fetching users...")
     headers = {"Authorization": f"Bearer {token}", "Organization": org}
-    base_url = "https://app.nobl9.com/api/usrmgmt/v2/users?limit=50"
+    
+    # Use custom base URL for custom instances
+    if is_custom_instance and custom_base_url:
+        api_base_url = f"{custom_base_url}/usrmgmt/v2/users?limit=50"
+    else:
+        api_base_url = "https://app.nobl9.com/api/usrmgmt/v2/users?limit=50"
     next_token = None
     seen_tokens = set()
     all_users = []
     page_count = 0
 
     while True:
-        url = base_url
+        url = api_base_url
         if next_token:
             if next_token in seen_tokens:
                 print("Repeated next token detected — stopping pagination.")
@@ -279,11 +311,16 @@ def collect_users(token, org):
     print(f"✓ User collection complete! Total: {len(all_users)} users")
     return all_users
 
-def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
+def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids, is_custom_instance=False, custom_base_url=None, okta_org_url=None, okta_auth_server=None):
     logs = []
     offset = 0
     limit = 100
-    base_url = "https://app.nobl9.com/api/audit/v1/logs"
+    
+    # Use custom base URL for custom instances
+    if is_custom_instance and custom_base_url:
+        api_base_url = f"{custom_base_url}/audit/v1/logs"
+    else:
+        api_base_url = "https://app.nobl9.com/api/audit/v1/logs"
     
     # Add time range validation
     try:
@@ -330,7 +367,7 @@ def fetch_audit_logs(token, org, start_time, end_time, admin_user_ids):
         
         try:
             response = requests.get(
-                base_url,
+                api_base_url,
                 headers=headers,
                 params=params,
                 timeout=30
@@ -586,14 +623,20 @@ def main():
         print("ERROR: Authentication failed")
         sys.exit(1)
     
-    users = collect_users(token, org)
+    # Get custom instance information from credentials
+    is_custom_instance = credentials.get("is_custom_instance", False)
+    custom_base_url = credentials.get("base_url")
+    okta_org_url = credentials.get("oktaOrgURL")
+    okta_auth_server = credentials.get("oktaAuthServer")
+    
+    users = collect_users(token, org, is_custom_instance, custom_base_url, okta_org_url, okta_auth_server)
     admin_user_ids = select_admin_users(users)  # Replace existing admin_user_ids logic
     
     print(f"\nMonitoring actions for {len(admin_user_ids)} admin user(s)")
     
     start_time, end_time = select_time_period()
     
-    audit_logs = fetch_audit_logs(token, org, start_time, end_time, admin_user_ids)
+    audit_logs = fetch_audit_logs(token, org, start_time, end_time, admin_user_ids, is_custom_instance, custom_base_url, okta_org_url, okta_auth_server)
     
     # Replace raw print with formatted display and export
     display_and_export_logs(audit_logs, users, context_name)

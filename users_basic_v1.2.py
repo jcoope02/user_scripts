@@ -48,8 +48,33 @@ def load_contexts_from_toml():
     else:
         path = default_path
 
-    toml_data = toml.load(path)
-    return toml_data.get("contexts", {})
+    try:
+        toml_data = toml.load(path)
+        raw_contexts = toml_data.get("contexts", {})
+        parsed_contexts = {}
+        
+        for ctx_name, creds in raw_contexts.items():
+            if "clientId" in creds and "clientSecret" in creds:
+                # Check if this is a custom instance (has url field)
+                is_custom_instance = "url" in creds
+                base_url = creds.get("url")
+                okta_org_url = creds.get("oktaOrgURL")
+                okta_auth_server = creds.get("oktaAuthServer")
+                
+                parsed_contexts[ctx_name] = {
+                    "clientId": creds["clientId"],
+                    "clientSecret": creds["clientSecret"],
+                    "accessToken": creds.get("accessToken", ""),
+                    "organization": creds.get("organization", None),
+                    "is_custom_instance": is_custom_instance,
+                    "base_url": base_url,
+                    "oktaOrgURL": okta_org_url,
+                    "oktaAuthServer": okta_auth_server
+                }
+        return parsed_contexts
+    except Exception as e:
+        print(f"Failed to parse TOML config: {e}")
+        return {}
 
 def choose_context(contexts, override=None):
     keys = list(contexts.keys())
@@ -73,7 +98,7 @@ def choose_context(contexts, override=None):
         print("Invalid selection.")
         exit(1)
 
-def get_token(client_id, client_secret, org_name):
+def get_token(client_id, client_secret, org_name, is_custom_instance=False, custom_base_url=None):
     creds = f"{client_id}:{client_secret}"
     b64_creds = base64.b64encode(creds.encode()).decode()
     headers = {
@@ -81,7 +106,14 @@ def get_token(client_id, client_secret, org_name):
         "Content-Type": "application/json",
         "Organization": org_name
     }
-    res = requests.post("https://app.nobl9.com/api/accessToken", headers=headers)
+    
+    # Use custom base URL for custom instances
+    if is_custom_instance and custom_base_url:
+        auth_url = f"{custom_base_url}/accessToken"
+    else:
+        auth_url = "https://app.nobl9.com/api/accessToken"
+    
+    res = requests.post(auth_url, headers=headers)
     token = res.json().get("access_token")
     if not token:
         print("ERROR: Failed to get access token")
@@ -100,16 +132,22 @@ def decode_jwt_payload(token):
     except Exception as e:
         return None
 
-def fetch_users(token, org):
+def fetch_users(token, org, is_custom_instance=False, custom_base_url=None):
     headers = {"Authorization": f"Bearer {token}", "Organization": org}
-    base_url = "https://app.nobl9.com/api/usrmgmt/v2/users?limit=50"
+    
+    # Use custom base URL for custom instances
+    if is_custom_instance and custom_base_url:
+        api_base_url = f"{custom_base_url}/usrmgmt/v2/users?limit=50"
+    else:
+        api_base_url = "https://app.nobl9.com/api/usrmgmt/v2/users?limit=50"
+    
     next_token = None
     seen_tokens = set()
     all_users = []
     page_count = 0
 
     while True:
-        url = base_url
+        url = api_base_url
         if next_token:
             if next_token in seen_tokens:
                 print("Repeated next token detected — stopping pagination.")
@@ -215,10 +253,17 @@ def main():
         print("Missing credentials in context.")
         exit(1)
     
-    token = get_token(client_id, client_secret, org_name)
+    # Get custom instance information from credentials
+    is_custom_instance = creds.get("is_custom_instance", False)
+    custom_base_url = creds.get("base_url")
+    
+    if is_custom_instance and custom_base_url:
+        print(f"API base url: {custom_base_url}")
+    
+    token = get_token(client_id, client_secret, org_name, is_custom_instance, custom_base_url)
     print(f"\nUsing organization: {org_name}")
 
-    users = fetch_users(token, org_name)
+    users = fetch_users(token, org_name, is_custom_instance, custom_base_url)
 
     export_flag = None
     if args.c:
